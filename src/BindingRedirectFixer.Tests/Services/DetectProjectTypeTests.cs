@@ -166,6 +166,76 @@ public class DetectProjectTypeTests
         finally { Cleanup(dir); }
     }
 
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectIsLibrary_LegacyWap_ProjectTypeGuid_ReturnsFalse()
+    {
+        // Legacy ASP.NET Web Application Project (WAP): OutputType=Library + WAP flavor GUID.
+        // Despite OutputType=Library, this is a host project — IIS reads web.config redirects.
+        string dir = CreateTempProjectDir("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+                <OutputType>Library</OutputType>
+                <ProjectTypeGuids>{349c5851-65df-11da-9384-00065b846f21};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids>
+              </PropertyGroup>
+            </Project>
+            """);
+        try
+        {
+            Assert.IsFalse(BindingRedirectAnalyzer.DetectIsLibrary(dir));
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectIsLibrary_LegacyWap_WebApplicationTargetsImport_ReturnsFalse()
+    {
+        // Some legacy WAP projects rely on Microsoft.WebApplication.targets without
+        // ProjectTypeGuids — still a host project.
+        string dir = CreateTempProjectDir("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+                <OutputType>Library</OutputType>
+              </PropertyGroup>
+              <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0\WebApplications\Microsoft.WebApplication.targets" />
+            </Project>
+            """);
+        try
+        {
+            Assert.IsFalse(BindingRedirectAnalyzer.DetectIsLibrary(dir));
+        }
+        finally { Cleanup(dir); }
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void DetectIsLibrary_LegacyWap_BothSignals_ReturnsFalse()
+    {
+        // Typical full WAP: both ProjectTypeGuids and WebApplication.targets import.
+        // Matches the real-world Amx.Amms.Ui.Web.csproj shape.
+        string dir = CreateTempProjectDir("""
+            <?xml version="1.0" encoding="utf-8"?>
+            <Project ToolsVersion="15.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+              <PropertyGroup>
+                <TargetFrameworkVersion>v4.8</TargetFrameworkVersion>
+                <OutputType>Library</OutputType>
+                <ProjectTypeGuids>{349c5851-65df-11da-9384-00065b846f21};{fae04ec0-301f-11d3-bf4b-00c04f79efbc}</ProjectTypeGuids>
+              </PropertyGroup>
+              <Import Project="$(MSBuildExtensionsPath32)\Microsoft\VisualStudio\v17.0\WebApplications\Microsoft.WebApplication.targets" />
+            </Project>
+            """);
+        try
+        {
+            Assert.IsFalse(BindingRedirectAnalyzer.DetectIsLibrary(dir));
+        }
+        finally { Cleanup(dir); }
+    }
+
     #endregion
 
     #region DetectIsTestProject

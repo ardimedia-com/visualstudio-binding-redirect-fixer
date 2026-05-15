@@ -5,6 +5,12 @@ All notable changes to the Binding Redirect Fixer extension will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.12] - 2026-05-15
+
+### Fixed
+
+- **False "UNUSED IN LIBRARY" flag on legacy ASP.NET Web Application Projects**: `DetectIsLibrary` previously recognized only SDK-style Web projects (`Microsoft.NET.Sdk.Web`) as host applications. Legacy ASP.NET MVC / WebForms / WebAPI projects use `OutputType=Library` but are hosted by IIS, which reads `web.config` binding redirects at runtime. They were wrongly flagged as DLL libraries whose redirects could be removed, surfacing "All binding redirects in this project can be safely removed" and a "Remove All Redirects" button that would have broken the running application. Detection now also returns false when the `.csproj` contains the WAP flavor GUID `{349c5851-65df-11da-9384-00065b846f21}` in `<ProjectTypeGuids>` or imports `Microsoft.WebApplication.targets`.
+
 ## [0.3.11] - 2026-04-08
 
 ### Fixed

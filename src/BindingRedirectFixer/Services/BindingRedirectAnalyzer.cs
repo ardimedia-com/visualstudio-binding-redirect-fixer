@@ -448,9 +448,20 @@ public sealed class BindingRedirectAnalyzer
     }
 
     /// <summary>
-    /// Detects whether the project produces a class library (DLL) output rather than an executable.
+    /// Detects whether the project produces a class library (DLL) output rather than a host
+    /// application that loads binding redirects at runtime.
     /// SDK-style projects default to Library when no OutputType is specified.
-    /// Web SDK projects (Microsoft.NET.Sdk.Web) are always considered executables.
+    /// Returns <c>false</c> for host projects (executables and ASP.NET web applications),
+    /// because IIS / the CLR will read binding redirects from their config file at runtime:
+    /// <list type="bullet">
+    ///   <item>SDK-style Web projects (<c>Microsoft.NET.Sdk.Web</c>)</item>
+    ///   <item>Legacy ASP.NET Web Application Projects (WAP) — non-SDK projects with
+    ///         <c>OutputType=Library</c> that are hosted by IIS. Identified by either the
+    ///         WAP flavor GUID <c>{349c5851-65df-11da-9384-00065b846f21}</c> in
+    ///         <c>ProjectTypeGuids</c> or an import of
+    ///         <c>Microsoft.WebApplication.targets</c>.</item>
+    ///   <item>Executables (<c>OutputType=Exe</c> or <c>WinExe</c>)</item>
+    /// </list>
     /// </summary>
     internal static bool DetectIsLibrary(string projectDirectory)
     {
@@ -469,6 +480,17 @@ public sealed class BindingRedirectAnalyzer
             // Web SDK projects are always host applications
             string? sdkAttr = doc.Root?.Attribute("Sdk")?.Value;
             if (sdkAttr is not null && sdkAttr.Contains("Microsoft.NET.Sdk.Web", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            // Legacy ASP.NET Web Application Project (WAP): non-SDK project with OutputType=Library,
+            // but hosted by IIS — IIS reads web.config binding redirects at runtime. Two signals:
+            //   1. WAP flavor GUID in <ProjectTypeGuids> (covers MVC, WebForms, WebAPI)
+            //   2. <Import Project="...Microsoft.WebApplication.targets" />
+            // Either alone is sufficient.
+            if (csprojContent.Contains("{349c5851-65df-11da-9384-00065b846f21}", StringComparison.OrdinalIgnoreCase) ||
+                csprojContent.Contains("Microsoft.WebApplication.targets", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
