@@ -201,7 +201,10 @@ public sealed class BindingRedirectAnalyzer
     /// must cover all referenced versions and newVersion must match what the runtime loads.
     /// 0. DUPLICATE: multiple binding redirect entries exist for the same assembly.
     /// 0b. MISMATCH: redirect targets a version not on disk (bin/ DLL older than NuGet resolved).
+    /// 0c. TOKEN_LOST: resolved assembly is unsigned but config has a non-empty token.
     /// 1. MISSING: no redirect exists AND assembly has version conflicts AND is in bin/.
+    /// 1b. CRITICAL_MISMATCH: redirect targets a version greater than MAX(bin/, packages/)
+    ///     — points forward to a version that doesn't exist; runtime FileLoadException at startup.
     /// 2. STALE: CurrentRedirectVersion != EffectiveTargetVersion.
     /// 3. OK (informational): bin/ DLL differs from NuGet resolved — no action needed.
     /// 4. OK: all sources agree.
@@ -337,6 +340,40 @@ public sealed class BindingRedirectAnalyzer
                 $"Target version: {target ?? "unknown"}.";
             entry.SuggestedAction = FixAction.AddRedirect;
             return;
+        }
+
+        // Rule 1b: CRITICAL MISMATCH — redirect points FORWARD to a version that doesn't exist yet
+        // Fires when config target is strictly greater than the effective target (MAX of bin/ and
+        // packages/). The user (or a bulk-edit) set newVersion to a version that has never been
+        // installed — the CLR will throw FileLoadException at app startup because there is no DLL
+        // to load that satisfies the redirect.
+        // STALE (config < target) is a different shape: the redirect is behind reality and a
+        // rebuild / restore is typically the fix. CRITICAL MISMATCH (config > target) requires
+        // changing the redirect itself, urgently.
+        if (!string.IsNullOrEmpty(entry.CurrentRedirectVersion) && !string.IsNullOrEmpty(target))
+        {
+            try
+            {
+                var configVer = new Version(entry.CurrentRedirectVersion);
+                var targetVer = new Version(target);
+
+                if (configVer > targetVer)
+                {
+                    entry.Status = RedirectStatus.CriticalMismatch;
+                    entry.DiagnosticMessage =
+                        $"The binding redirect for '{entry.Name}' targets version {entry.CurrentRedirectVersion}, " +
+                        $"but no DLL with that version exists on disk " +
+                        $"(bin/: {entry.PhysicalVersion ?? "n/a"}, packages/: {entry.ResolvedAssemblyVersion ?? "n/a"}). " +
+                        $"The runtime will throw FileLoadException at startup. " +
+                        $"Update the redirect to {target}.";
+                    entry.SuggestedAction = FixAction.UpdateRedirect;
+                    return;
+                }
+            }
+            catch
+            {
+                // Version parsing failed — fall through to STALE / other rules
+            }
         }
 
         // Rule 2: STALE — redirect exists but doesn't match the effective target version

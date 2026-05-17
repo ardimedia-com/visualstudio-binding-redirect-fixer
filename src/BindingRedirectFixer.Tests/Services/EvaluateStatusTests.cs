@@ -264,6 +264,97 @@ public class EvaluateStatusTests
 
     #endregion
 
+    #region Rule 1b: CRITICAL MISMATCH
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CriticalMismatch_ConfigAboveBothPhysicalAndResolved_SetsUpdateRedirect()
+    {
+        // Real-world case: Web.config redirect bumped to 4.2.1.0, but package is 4.2.0
+        // and bin/ DLL is 4.2.0.0 — runtime FileLoadException at startup.
+        var entry = CreateEntry(
+            name: "Serilog.Sinks.Email",
+            resolvedVersion: "4.2.0.0",
+            physicalVersion: "4.2.0.0",
+            currentRedirectVersion: "4.2.1.0");
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.CriticalMismatch, entry.Status);
+        Assert.AreEqual(FixAction.UpdateRedirect, entry.SuggestedAction);
+        Assert.IsTrue(entry.DiagnosticMessage.Contains("4.2.1.0"));
+        Assert.IsTrue(entry.DiagnosticMessage.Contains("4.2.0.0"));
+        Assert.IsTrue(entry.DiagnosticMessage.Contains("FileLoadException"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CriticalMismatch_ConfigAboveResolvedOnly_BinEmpty_StillFires()
+    {
+        // No bin/ build, but packages/ has 1.10.0 installed; config redirects to 1.12.0 (typo).
+        var entry = CreateEntry(
+            name: "System.ClientModel",
+            resolvedVersion: "1.10.0.0",
+            physicalVersion: null,
+            currentRedirectVersion: "1.12.0.0");
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.CriticalMismatch, entry.Status);
+        Assert.AreEqual(FixAction.UpdateRedirect, entry.SuggestedAction);
+        Assert.IsTrue(entry.DiagnosticMessage.Contains("1.12.0.0"));
+        Assert.IsTrue(entry.DiagnosticMessage.Contains("1.10.0.0"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CriticalMismatch_ConfigBelowTarget_DoesNotFire_FallsToStale()
+    {
+        // Config is BELOW target — that's STALE (redirect lags reality), not CRITICAL MISMATCH.
+        var entry = CreateEntry(
+            resolvedVersion: "13.0.0.0",
+            physicalVersion: "13.0.0.0",
+            currentRedirectVersion: "12.0.0.0");
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.Stale, entry.Status);
+        Assert.AreEqual(FixAction.UpdateRedirect, entry.SuggestedAction);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CriticalMismatch_ConfigEqualsTarget_NoIssue_FallsToOk()
+    {
+        // All three agree on the same version — OK.
+        var entry = CreateEntry(
+            resolvedVersion: "5.0.0.0",
+            physicalVersion: "5.0.0.0",
+            currentRedirectVersion: "5.0.0.0");
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.OK, entry.Status);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CriticalMismatch_PromotedAboveStale_TakesPrecedence()
+    {
+        // Config above resolved (CRITICAL territory) AND bin/ differs from resolved (could be
+        // OK informational) — CRITICAL takes precedence because the runtime failure is concrete.
+        var entry = CreateEntry(
+            resolvedVersion: "4.2.0.0",
+            physicalVersion: "4.2.0.0",
+            currentRedirectVersion: "4.2.99.0");
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.CriticalMismatch, entry.Status);
+    }
+
+    #endregion
+
     #region Rule 2: STALE
 
     [TestMethod]

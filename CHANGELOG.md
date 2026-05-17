@@ -5,6 +5,13 @@ All notable changes to the Binding Redirect Fixer extension will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.13] - 2026-05-17
+
+### Added
+
+- **`CRITICAL MISMATCH` status**: distinct red-severity classification for binding redirects whose `newVersion` is strictly greater than the highest version available on disk (`MAX(bin/, packages/)`). This catches the "site won't start" failure mode where `Web.config` was hand-edited or bulk-updated to a version that no installed package provides — the CLR throws `FileLoadException` at startup because the redirect demands a DLL that cannot be loaded from anywhere. Previously these would have been buried in generic `STALE` entries; now they surface separately at the top of the Issues list with `[Update Redirect]` as the suggested fix. New `Critical Mismatch` filter in the status dropdown.
+- **Build-required banner**: when the scan completes but no on-disk DLLs were found for any of the binding redirects (project hasn't been built or NuGet packages not restored), the tool window now displays a red banner explaining that `MISMATCH` / `STALE` / `CRITICAL MISMATCH` detection is degraded and most entries will incorrectly surface as `ORPHANED`. Prompts the user to build and restore before relying on the analysis. Also fires (with a softer message) when more than half of all redirects have no matching DLL.
+
 ## [0.3.12] - 2026-05-15
 
 ### Fixed

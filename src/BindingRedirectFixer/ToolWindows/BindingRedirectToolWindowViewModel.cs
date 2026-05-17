@@ -33,6 +33,8 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     private AssemblyRedirectInfoViewModel? _selectedIssue;
     private bool _hasSolution;
     private bool _showInfoBar = true;
+    private bool _showBuildBanner;
+    private string _buildBannerMessage = string.Empty;
     private string _statusText = "Ready. Click Analyse to examine binding redirects.";
     private bool _isIssuesTabSelected = true;
     private bool _isLearnTabSelected;
@@ -67,7 +69,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
 
         Issues = [];
         Projects = ["All Projects"];
-        Statuses = ["All", "Issues Only", "Stale", "Missing", "Mismatch", "Duplicate", "Conflict", "Token Lost", "Orphaned .NET (Core)", "Orphaned .NET Framework", "Unused in Library", "Deprecated", "OK"];
+        Statuses = ["All", "Issues Only", "Critical Mismatch", "Stale", "Missing", "Mismatch", "Duplicate", "Conflict", "Token Lost", "Orphaned .NET (Core)", "Orphaned .NET Framework", "Unused in Library", "Deprecated", "OK"];
 
         FixAllCommand = new AsyncCommand(ExecuteFixAllAsync);
         RefreshCommand = new AsyncCommand(ExecuteRefreshAsync);
@@ -400,6 +402,37 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     /// <summary>WPF Visibility for the info bar.</summary>
     [DataMember]
     public string InfoBarVisibility => _showInfoBar ? "Visible" : "Collapsed";
+
+    /// <summary>
+    /// Build-required banner: shown when the scan ran but no DLLs were found on disk,
+    /// which means MISMATCH / STALE / CRITICAL MISMATCH detection is degraded and most
+    /// entries will incorrectly surface as ORPHANED. Prompts the user to build the
+    /// solution and restore NuGet packages before relying on the analysis.
+    /// </summary>
+    [DataMember]
+    public bool ShowBuildBanner
+    {
+        get => _showBuildBanner;
+        set
+        {
+            if (SetProperty(ref _showBuildBanner, value))
+            {
+                RaiseNotifyPropertyChangedEvent(nameof(BuildBannerVisibility));
+            }
+        }
+    }
+
+    /// <summary>WPF Visibility for the build-required banner.</summary>
+    [DataMember]
+    public string BuildBannerVisibility => _showBuildBanner ? "Visible" : "Collapsed";
+
+    /// <summary>Diagnostic message shown inside the build-required banner.</summary>
+    [DataMember]
+    public string BuildBannerMessage
+    {
+        get => _buildBannerMessage;
+        set => SetProperty(ref _buildBannerMessage, value);
+    }
 
     /// <summary>WPF Visibility for the scanning indicator.</summary>
     [DataMember]
@@ -848,6 +881,35 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
             // Apply current filters (default: "Issues Only" hides OK entries)
             ApplyFilters();
             StatusText = $"Analysis complete. {totalProjects} project(s) scanned, {totalIssues} issue(s) found.";
+
+            // Build-required detection: if there are config redirects but no DLLs at all on disk,
+            // every entry will fall through to ORPHANED — which is misleading. Surface a banner so
+            // the user knows to build + restore before trusting the analysis.
+            var redirectsWithDll = _allResults.Count(r =>
+                !string.IsNullOrEmpty(r.CurrentRedirectVersion) &&
+                (!string.IsNullOrEmpty(r.PhysicalVersion) || !string.IsNullOrEmpty(r.ResolvedAssemblyVersion)));
+            var redirectsTotal = _allResults.Count(r => !string.IsNullOrEmpty(r.CurrentRedirectVersion));
+
+            if (redirectsTotal > 0 && redirectsWithDll == 0)
+            {
+                BuildBannerMessage =
+                    $"No DLLs were found on disk for any of the {redirectsTotal} binding redirects in this solution. " +
+                    "MISMATCH / STALE / CRITICAL MISMATCH detection is degraded — most entries will show as ORPHANED. " +
+                    "Build the solution (Debug or Release) and run NuGet restore, then re-analyse.";
+                ShowBuildBanner = true;
+            }
+            else if (redirectsTotal > 0 && redirectsWithDll < redirectsTotal / 2)
+            {
+                BuildBannerMessage =
+                    $"Only {redirectsWithDll} of {redirectsTotal} binding redirects could be matched to a DLL on disk. " +
+                    "Many entries will incorrectly surface as ORPHANED. " +
+                    "Build the solution and run NuGet restore for a complete analysis.";
+                ShowBuildBanner = true;
+            }
+            else
+            {
+                ShowBuildBanner = false;
+            }
         }
         catch (OperationCanceledException)
         {
@@ -1448,6 +1510,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
             "Issues Only" => filtered.Where(r => r.Status != RedirectStatus.OK),
             "Stale" => filtered.Where(r => r.Status == RedirectStatus.Stale),
             "Missing" => filtered.Where(r => r.Status == RedirectStatus.Missing),
+            "Critical Mismatch" => filtered.Where(r => r.Status == RedirectStatus.CriticalMismatch),
             "Mismatch" => filtered.Where(r => r.Status == RedirectStatus.Mismatch),
             "Duplicate" => filtered.Where(r => r.Status == RedirectStatus.Duplicate),
             "Conflict" => filtered.Where(r => r.Status == RedirectStatus.Conflict),
@@ -1557,6 +1620,7 @@ public class AssemblyRedirectInfoViewModel : NotifyPropertyChangedObject
         RedirectStatus.Conflict => "CONFLICT",
         RedirectStatus.Duplicate => "DUPLICATE",
         RedirectStatus.Mismatch => "MISMATCH",
+        RedirectStatus.CriticalMismatch => "CRITICAL MISMATCH",
         RedirectStatus.TokenLost => "TOKEN LOST",
         RedirectStatus.Deprecated => "DEPRECATED",
         RedirectStatus.Orphaned => "ORPHANED .NET (Core)",
@@ -1575,6 +1639,7 @@ public class AssemblyRedirectInfoViewModel : NotifyPropertyChangedObject
         RedirectStatus.Conflict => "CONFLICT",
         RedirectStatus.Duplicate => "DUPLICATE",
         RedirectStatus.Mismatch => "MISMATCH",
+        RedirectStatus.CriticalMismatch => "CRITICAL MISMATCH",
         RedirectStatus.TokenLost => "TOKEN LOST",
         RedirectStatus.Deprecated => "DEPRECATED",
         RedirectStatus.Orphaned => "ORPHANED .NET (Core)",

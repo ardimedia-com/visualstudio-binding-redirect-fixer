@@ -79,6 +79,7 @@ The extension reads assembly versions from multiple sources and compares them:
 | **CONFLICT** | Config is correct but the bin/ DLL is outdated | Triggers a clean rebuild |
 | **DUPLICATE** | Multiple redirects exist for the same assembly | Removes the duplicate entry |
 | **MISMATCH** | Redirect targets a version not available on disk (bin/ DLL is older than NuGet resolved) | Removes the redirect so the runtime loads the bin/ DLL directly |
+| **CRITICAL MISMATCH** | Redirect points FORWARD to a version greater than the highest DLL on disk -- runtime `FileLoadException` at startup is guaranteed | Updates `newVersion` to the highest version available on disk |
 | **TOKEN LOST** | DLL exists but is unsigned while config expects a public key token | Preserves token, updates version if needed |
 | **DEPRECATED** | Package is deprecated and should be replaced with a modern equivalent (e.g., `AppAuthentication` -> `Azure.Identity`) | Removes redirect (with warning to check NuGet refs) |
 | **ORPHANED .NET (Core)** | No DLL found in a .NET (Core) project -- redirect is orphaned | Removes the redirect (safe) |

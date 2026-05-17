@@ -25,6 +25,9 @@ public enum RedirectStatus
     /// <summary>Redirect targets a version not available on disk (bin/ DLL is older than NuGet resolved).</summary>
     Mismatch,
 
+    /// <summary>Redirect targets a version that exists nowhere on disk (neither bin/ nor packages/). Runtime FileLoadException at startup is guaranteed.</summary>
+    CriticalMismatch,
+
     /// <summary>The resolved assembly's public key token is empty but the config has a non-empty token (assembly may have lost strong naming).</summary>
     TokenLost,
 
@@ -171,6 +174,7 @@ public class AssemblyRedirectInfo
         RedirectStatus.Conflict => "\u2717",
         RedirectStatus.Duplicate => "\u2717",
         RedirectStatus.Mismatch => "\u26A0",
+        RedirectStatus.CriticalMismatch => "\u2717",
         RedirectStatus.TokenLost => "\u26A0",
         RedirectStatus.Deprecated => "\u26D4",
         RedirectStatus.Orphaned => "\u26A0",

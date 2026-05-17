@@ -367,7 +367,24 @@
                 </Grid>
             </Border>
 
-            <!-- Issues List + Detail Panel (Row 3 unused, list starts at Row 4) -->
+            <!-- Build-Required Banner (auto-shown when scan ran but no DLLs were found on disk) -->
+            <Border Grid.Row="3"
+                    BorderBrush="#E05050"
+                    BorderThickness="0,0,0,3"
+                    CornerRadius="3"
+                    Margin="8,0,8,6"
+                    Padding="10,8"
+                    Background="Transparent"
+                    Visibility="{Binding BuildBannerVisibility}">
+                <StackPanel>
+                    <TextBlock Text="Build solution + restore NuGet packages first"
+                               FontWeight="Bold" FontSize="12" Foreground="#E05050" Margin="0,0,0,4" />
+                    <TextBlock Text="{Binding BuildBannerMessage}"
+                               TextWrapping="Wrap" FontSize="11" Opacity="0.85" />
+                </StackPanel>
+            </Border>
+
+            <!-- Issues List + Detail Panel -->
             <Grid Grid.Row="4" Margin="8,0,8,4">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="*" />
@@ -686,6 +703,18 @@
                            FontSize="18" FontWeight="Bold" Margin="0,0,0,12" />
 
                 <!-- ── Red (error / action required) ── -->
+
+                <!-- CRITICAL MISMATCH Card -->
+                <Border BorderBrush="#E05050" BorderThickness="0,0,0,3" CornerRadius="4" Margin="0,0,0,12" Padding="14,10" Background="Transparent">
+                    <StackPanel>
+                        <TextBlock Text="CRITICAL MISMATCH  &#x2014;  Redirect Points Forward to Non-Existent Version" FontSize="13" FontWeight="Bold" Foreground="#E05050" Margin="0,0,0,6" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" Opacity="0.85"
+                                   Text="The binding redirect's newVersion is strictly greater than the highest DLL version available on disk (neither bin/ nor any installed NuGet package contains it). The CLR will throw FileLoadException at application startup because the redirect demands a version that cannot be loaded." />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" Opacity="0.85"
+                                   Text="Typical cause: Web.config / app.config was hand-edited or bulk-updated (e.g. by a search-and-replace across many redirects) to a version that doesn't match what is actually installed. This is the &quot;site won't start&quot; failure that surfaces only after deploy." />
+                        <TextBlock FontSize="11" Opacity="0.55" FontStyle="Italic" Text="The tool detects this and offers [Update Redirect] to the highest version available on disk" />
+                    </StackPanel>
+                </Border>
 
                 <!-- CONFLICT Card -->
                 <Border BorderBrush="#E05050" BorderThickness="0,0,0,3" CornerRadius="4" Margin="0,0,0,12" Padding="14,10" Background="Transparent">
