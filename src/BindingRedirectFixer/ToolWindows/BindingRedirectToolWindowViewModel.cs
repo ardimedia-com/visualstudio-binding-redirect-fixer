@@ -83,6 +83,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
         SubmitFeedbackCommand = new AsyncCommand(ExecuteSubmitFeedbackAsync);
         FixSelectedCommand = new AsyncCommand(ExecuteFixSelectedAsync);
         RunOrphanVerificationCommand = new AsyncCommand(ExecuteRunOrphanVerificationAsync);
+        OpenConfigFileCommand = new AsyncCommand(ExecuteOpenConfigFileAsync);
         FilterByProjectCommand = new AsyncCommand(ExecuteFilterByProjectAsync);
         FilterByStatusCommand = new AsyncCommand(ExecuteFilterByStatusAsync);
         ApplyAssemblyFilterCommand = new AsyncCommand(ExecuteApplyAssemblyFilterAsync);
@@ -594,6 +595,15 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     /// </summary>
     [DataMember]
     public IAsyncCommand RunOrphanVerificationCommand { get; }
+
+    /// <summary>
+    /// Command that opens the selected project's web.config / app.config in the OS default
+    /// editor (or Visual Studio when launched from inside it). Used as the manual-removal
+    /// escape hatch in the OrphanedFramework guided panel when auto checks have blocked
+    /// the automatic Remove path.
+    /// </summary>
+    [DataMember]
+    public IAsyncCommand OpenConfigFileCommand { get; }
 
     /// <summary>Command to apply the project filter from the dropdown.</summary>
     [DataMember]
@@ -1463,6 +1473,59 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
         }
     }
 
+    private async Task ExecuteOpenConfigFileAsync(object? parameter, CancellationToken cancellationToken)
+    {
+        if (SelectedIssue is null)
+        {
+            return;
+        }
+        if (!_projectDirectories.TryGetValue(SelectedIssue.ProjectName, out string? projectDir))
+        {
+            StatusText = $"Could not find project directory for {SelectedIssue.Name}.";
+            return;
+        }
+
+        string? configPath = _configPatcher.GetConfigFilePath(projectDir);
+        if (configPath is null || !File.Exists(configPath))
+        {
+            StatusText = $"Config file not found under {projectDir}.";
+            return;
+        }
+
+        // Preferred path: ask the VS shell to open the document in the IDE. This works inside
+        // the VS process and lands the file as an editor tab. We can't use
+        // Process.Start(..., UseShellExecute=true) for .config because Windows has no default
+        // file association for .config — the call returns silently with no UI shown.
+        try
+        {
+            var uri = new Uri(configPath);
+            await this.Extensibility
+                .Documents()
+                .OpenDocumentAsync(uri, cancellationToken)
+                .ConfigureAwait(true);
+            StatusText = $"Opened {Path.GetFileName(configPath)} in the editor.";
+            return;
+        }
+        catch (Exception ex)
+        {
+            // Fall back to Explorer with the file selected so the user can still get to it.
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = "explorer.exe",
+                    Arguments = $"/select,\"{configPath}\"",
+                    UseShellExecute = false,
+                });
+                StatusText = $"Could not open in editor ({ex.GetType().Name}); revealed in Explorer.";
+            }
+            catch (Exception ex2)
+            {
+                StatusText = $"Could not open config file: {ex2.Message}";
+            }
+        }
+    }
+
     /// <summary>
     /// Best-effort solution-root inference: returns the common ancestor directory of every
     /// known project directory. Used by the source-usage check to scope its grep to the
@@ -1816,6 +1879,12 @@ public class AssemblyRedirectInfoViewModel : NotifyPropertyChangedObject
                 RaiseNotifyPropertyChangedEvent(nameof(RunButtonVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(VerificationResultVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(VerificationVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(HasOnlyPassingAutoChecks));
+                RaiseNotifyPropertyChangedEvent(nameof(HasFailedAutoChecks));
+                RaiseNotifyPropertyChangedEvent(nameof(HasInconclusiveAutoChecks));
+                RaiseNotifyPropertyChangedEvent(nameof(BlockedHintVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(RemoveControlsVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(BlockHintText));
                 RaiseNotifyPropertyChangedEvent(nameof(VerificationAuto));
                 RaiseNotifyPropertyChangedEvent(nameof(PostBuildScript));
                 RaiseNotifyPropertyChangedEvent(nameof(HasPostBuildScript));
@@ -1838,6 +1907,73 @@ public class AssemblyRedirectInfoViewModel : NotifyPropertyChangedObject
     /// <summary>Result checklist + Remove button are visible only after the first run.</summary>
     [DataMember]
     public string VerificationResultVisibility => HasVerification ? "Visible" : "Collapsed";
+
+    /// <summary>
+    /// True iff verification has run AND every auto check came back Pass. This is the
+    /// only state where the user-confirmation checkbox + Remove button add value;
+    /// everything else (a Fail, an Inconclusive, or no run yet) is a hard block.
+    /// </summary>
+    [DataMember]
+    public bool HasOnlyPassingAutoChecks => _verification is { } v
+        && v.Auto.Count > 0
+        && v.Auto.TrueForAll(c => c.Outcome == SafetyCheckOutcome.Pass);
+
+    /// <summary>True when at least one auto check returned Fail.</summary>
+    [DataMember]
+    public bool HasFailedAutoChecks => _verification is { } v
+        && v.Auto.Exists(c => c.Outcome == SafetyCheckOutcome.Fail);
+
+    /// <summary>True when at least one auto check returned Inconclusive (and none Failed).</summary>
+    [DataMember]
+    public bool HasInconclusiveAutoChecks => _verification is { } v
+        && v.Auto.Exists(c => c.Outcome == SafetyCheckOutcome.Inconclusive);
+
+    /// <summary>
+    /// Visibility for the "blocked" hint shown when verification has run but the
+    /// auto checks did NOT all pass (one or more Fail / Inconclusive).
+    /// </summary>
+    [DataMember]
+    public string BlockedHintVisibility =>
+        HasVerification && !HasOnlyPassingAutoChecks ? "Visible" : "Collapsed";
+
+    /// <summary>
+    /// Visibility for the manual-confirmation checkbox + Remove button. Shown only
+    /// when every auto check passed — when blocked, those controls are useless and
+    /// the user is routed to the manual-edit path instead.
+    /// </summary>
+    [DataMember]
+    public string RemoveControlsVisibility =>
+        HasOnlyPassingAutoChecks ? "Visible" : "Collapsed";
+
+    /// <summary>
+    /// Free-text explanation shown inside the blocked hint, tailored to whether the
+    /// block is due to a Fail or an Inconclusive auto check.
+    /// </summary>
+    [DataMember]
+    public string BlockHintText
+    {
+        get
+        {
+            if (_verification is null)
+            {
+                return string.Empty;
+            }
+            if (HasFailedAutoChecks)
+            {
+                return "Automatic removal is blocked: a safety check found this assembly is still in use. " +
+                       "Resolve the underlying reference (delete the source usage, uninstall from the GAC, " +
+                       "or remove the transitively-referencing DLL), then click Re-run checks. " +
+                       "If you are certain the redirect is safe to remove, edit the config file manually.";
+            }
+            if (HasInconclusiveAutoChecks)
+            {
+                return "Automatic removal is blocked: one or more safety checks could not run conclusively " +
+                       "(for example because the project's bin/ folder is missing — build the project first). " +
+                       "Resolve and click Re-run checks, or edit the config file manually.";
+            }
+            return string.Empty;
+        }
+    }
 
     /// <summary>
     /// WPF visibility for the guided-verification panel — only shown for OrphanedFramework

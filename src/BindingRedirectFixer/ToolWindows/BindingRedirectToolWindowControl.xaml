@@ -676,18 +676,35 @@
                                                  Margin="0,4,0,0" />
                                     </Expander>
 
-                                    <!-- Manual confirmation checkbox -->
-                                    <CheckBox Content="I have reviewed the post-build script and confirmed no step copies this assembly."
-                                              IsChecked="{Binding SelectedIssue.UserConfirmedPostBuild, Mode=TwoWay}"
-                                              FontSize="11" Margin="0,4,0,8" />
+                                    <!-- Branch A: blocked (Fail or Inconclusive) — point user to manual edit -->
+                                    <StackPanel Visibility="{Binding SelectedIssue.BlockedHintVisibility}">
+                                        <Border Background="#3CE05050" BorderBrush="#E05050" BorderThickness="1"
+                                                CornerRadius="3" Padding="10,8" Margin="0,4,0,6">
+                                            <StackPanel>
+                                                <TextBlock Text="Automatic removal is blocked"
+                                                           FontWeight="SemiBold" FontSize="11.5" Foreground="#E05050"
+                                                           Margin="0,0,0,4" />
+                                                <TextBlock Text="{Binding SelectedIssue.BlockHintText}"
+                                                           TextWrapping="Wrap" FontSize="11" Opacity="0.9" />
+                                            </StackPanel>
+                                        </Border>
+                                        <Button Content="Open Config File for Manual Editing"
+                                                Command="{Binding OpenConfigFileCommand}"
+                                                Padding="14,4" HorizontalAlignment="Left" />
+                                    </StackPanel>
 
-                                    <!-- Remove button (gated on CanRemove) + block-reason tooltip -->
-                                    <Button Content="Remove Redirect"
-                                            Command="{Binding FixSelectedCommand}"
-                                            IsEnabled="{Binding SelectedIssue.CanRemove}"
-                                            ToolTip="{Binding SelectedIssue.BlockReason}"
-                                            ToolTipService.ShowOnDisabled="True"
-                                            Padding="18,5" HorizontalAlignment="Left" />
+                                    <!-- Branch B: all auto checks Pass — collect manual confirmation + Remove -->
+                                    <StackPanel Visibility="{Binding SelectedIssue.RemoveControlsVisibility}">
+                                        <CheckBox Content="I have reviewed the post-build script and confirmed no step copies this assembly."
+                                                  IsChecked="{Binding SelectedIssue.UserConfirmedPostBuild, Mode=TwoWay}"
+                                                  FontSize="11" Margin="0,4,0,8" />
+                                        <Button Content="Remove Redirect"
+                                                Command="{Binding FixSelectedCommand}"
+                                                IsEnabled="{Binding SelectedIssue.CanRemove}"
+                                                ToolTip="{Binding SelectedIssue.BlockReason}"
+                                                ToolTipService.ShowOnDisabled="True"
+                                                Padding="18,5" HorizontalAlignment="Left" />
+                                    </StackPanel>
                                 </StackPanel>
                             </StackPanel>
                         </Border>

@@ -139,4 +139,70 @@ public class AssemblyRedirectInfoViewModelTests
         Assert.AreEqual("✗", fail.OutcomeIcon);
         Assert.AreEqual("?", inc.OutcomeIcon);
     }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void AllPass_RemoveControlsVisible_BlockedHintHidden()
+    {
+        var vm = CreateOrphanedFwWrapper();
+        vm.Verification = new OrphanVerificationReport
+        {
+            Auto =
+            [
+                new() { Title = "Source", Outcome = SafetyCheckOutcome.Pass, Detail = "ok" },
+                new() { Title = "GAC", Outcome = SafetyCheckOutcome.Pass, Detail = "absent" },
+                new() { Title = "Bin refs", Outcome = SafetyCheckOutcome.Pass, Detail = "no referrers" },
+            ],
+        };
+
+        Assert.IsTrue(vm.HasOnlyPassingAutoChecks);
+        Assert.AreEqual("Visible", vm.RemoveControlsVisibility);
+        Assert.AreEqual("Collapsed", vm.BlockedHintVisibility);
+        Assert.AreEqual(string.Empty, vm.BlockHintText);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void OneCheckFails_BlockedHintVisible_RemoveControlsHidden()
+    {
+        var vm = CreateOrphanedFwWrapper();
+        vm.Verification = new OrphanVerificationReport
+        {
+            Auto =
+            [
+                new() { Title = "Source", Outcome = SafetyCheckOutcome.Pass, Detail = "ok" },
+                new() { Title = "Bin refs", Outcome = SafetyCheckOutcome.Fail, Detail = "Foo.dll still uses it" },
+            ],
+        };
+
+        Assert.IsFalse(vm.HasOnlyPassingAutoChecks);
+        Assert.IsTrue(vm.HasFailedAutoChecks);
+        Assert.AreEqual("Collapsed", vm.RemoveControlsVisibility);
+        Assert.AreEqual("Visible", vm.BlockedHintVisibility);
+        Assert.IsTrue(vm.BlockHintText.Contains("still in use"));
+        Assert.IsTrue(vm.BlockHintText.Contains("manually"),
+            "Hint must point the user at the manual-edit escape hatch.");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void Inconclusive_BlockedHintVisible_DifferentWording()
+    {
+        var vm = CreateOrphanedFwWrapper();
+        vm.Verification = new OrphanVerificationReport
+        {
+            Auto =
+            [
+                new() { Title = "Source", Outcome = SafetyCheckOutcome.Pass, Detail = "ok" },
+                new() { Title = "Bin refs", Outcome = SafetyCheckOutcome.Inconclusive, Detail = "no bin/ folder" },
+            ],
+        };
+
+        Assert.IsFalse(vm.HasOnlyPassingAutoChecks);
+        Assert.IsFalse(vm.HasFailedAutoChecks);
+        Assert.IsTrue(vm.HasInconclusiveAutoChecks);
+        Assert.AreEqual("Visible", vm.BlockedHintVisibility);
+        Assert.IsTrue(vm.BlockHintText.Contains("conclusively"),
+            "Hint text must distinguish inconclusive from outright failure.");
+    }
 }
