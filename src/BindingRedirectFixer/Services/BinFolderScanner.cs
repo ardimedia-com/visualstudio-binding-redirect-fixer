@@ -37,19 +37,37 @@ public sealed class BinFolderScanner
             return Task.FromResult(results);
         }
 
+        // Walk recursively so DLLs under bin/runtimes/<rid>/lib/<tfm>/ are also seen.
+        // Microsoft.Data.SqlClient and EntityFramework.SqlServer (among others) ship key
+        // assemblies in those subtrees; before recursion they were falsely reported as
+        // ORPHANED because nothing matched the top-level lib folder.
         string[] dllFiles;
         try
         {
-            dllFiles = Directory.GetFiles(binFolder, "*.dll", SearchOption.TopDirectoryOnly);
+            dllFiles = Directory.GetFiles(binFolder, "*.dll", SearchOption.AllDirectories);
         }
         catch (Exception)
         {
             return Task.FromResult(results);
         }
 
+        // Track the directory depth at which each assembly name was first recorded so a
+        // shallower (top-level) DLL wins over a deeper (runtimes/*) one if both exist.
+        // This keeps the reported PhysicalVersion aligned with what the CLR actually loads
+        // at runtime for managed code (top-level wins).
+        var depths = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         foreach (string dllPath in dllFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Skip native runtime DLLs — they're not managed assemblies and would only
+            // produce BadImageFormatException noise. Microsoft conventions place them
+            // under "runtimes/<rid>/native/" so a path-segment check is sufficient.
+            if (IsUnderNativeRuntimeFolder(dllPath))
+            {
+                continue;
+            }
 
             try
             {
@@ -61,7 +79,13 @@ public sealed class BinFolderScanner
                 }
 
                 string assemblyName = Path.GetFileNameWithoutExtension(dllPath);
-                results[assemblyName] = info.AssemblyVersion.ToString();
+                int depth = ComputeDepth(binFolder, dllPath);
+
+                if (!depths.TryGetValue(assemblyName, out int existing) || depth < existing)
+                {
+                    results[assemblyName] = info.AssemblyVersion.ToString();
+                    depths[assemblyName] = depth;
+                }
             }
             catch (Exception)
             {
@@ -70,6 +94,50 @@ public sealed class BinFolderScanner
         }
 
         return Task.FromResult(results);
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="dllPath"/> sits under a <c>runtimes\&lt;rid&gt;\native\</c>
+    /// subtree. Used to avoid attempting managed metadata reads against native libraries.
+    /// </summary>
+    private static bool IsUnderNativeRuntimeFolder(string dllPath)
+    {
+        string normalized = dllPath.Replace('/', '\\');
+        return normalized.IndexOf(@"\runtimes\", StringComparison.OrdinalIgnoreCase) >= 0
+            && normalized.IndexOf(@"\native\", StringComparison.OrdinalIgnoreCase) >= 0;
+    }
+
+    /// <summary>
+    /// Counts directory-separator hops between <paramref name="root"/> and the parent
+    /// folder of <paramref name="dllPath"/>. A DLL directly inside <paramref name="root"/>
+    /// has depth 0; one folder deeper has depth 1; etc.
+    /// </summary>
+    private static int ComputeDepth(string root, string dllPath)
+    {
+        string? parent = Path.GetDirectoryName(dllPath);
+        if (parent is null)
+        {
+            return 0;
+        }
+        string normalizedRoot = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (parent.Length <= normalizedRoot.Length)
+        {
+            return 0;
+        }
+        string rel = parent[(normalizedRoot.Length + 1)..];
+        if (string.IsNullOrEmpty(rel))
+        {
+            return 0;
+        }
+        int hops = 0;
+        foreach (char c in rel)
+        {
+            if (c == Path.DirectorySeparatorChar || c == Path.AltDirectorySeparatorChar)
+            {
+                hops++;
+            }
+        }
+        return hops + 1;
     }
 
     /// <summary>
