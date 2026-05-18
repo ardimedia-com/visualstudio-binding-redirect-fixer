@@ -6,7 +6,7 @@ using Microsoft.VisualStudio.RpcContracts.RemoteUI;
 
 /// <summary>
 /// Tool window provider for the Binding Redirect Fixer panel.
-/// Displays a multi-source version grid with Issues and Learn tabs.
+/// Displays a multi-source version grid with Issues, Background, and Feedback tabs.
 /// </summary>
 [VisualStudioContribution]
 public class BindingRedirectToolWindow : ToolWindow

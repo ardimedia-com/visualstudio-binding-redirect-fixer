@@ -273,7 +273,9 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     }
 
     /// <summary>
-    /// Whether the Learn tab is currently selected.
+    /// Whether the Background tab is currently selected. (Property name kept as
+    /// <c>IsLearnTabSelected</c> because renaming would ripple through the entire
+    /// Remote UI binding pipeline; the user-facing tab label is "Background".)
     /// </summary>
     [DataMember]
     public bool IsLearnTabSelected
@@ -316,7 +318,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     [DataMember]
     public string IssuesTabVisibility => _isIssuesTabSelected ? "Visible" : "Collapsed";
 
-    /// <summary>WPF Visibility string for the Learn tab content.</summary>
+    /// <summary>WPF Visibility string for the Background tab content (legacy property name).</summary>
     [DataMember]
     public string LearnTabVisibility => _isLearnTabSelected ? "Visible" : "Collapsed";
 
@@ -324,7 +326,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     [DataMember]
     public string IssuesTabFontWeight => _isIssuesTabSelected ? "Bold" : "Normal";
 
-    /// <summary>FontWeight for the Learn tab button.</summary>
+    /// <summary>FontWeight for the Background tab button (legacy property name).</summary>
     [DataMember]
     public string LearnTabFontWeight => _isLearnTabSelected ? "Bold" : "Normal";
 
@@ -332,7 +334,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     [DataMember]
     public string IssuesTabUnderline => _isIssuesTabSelected ? "0,0,0,2" : "0";
 
-    /// <summary>Bottom border thickness for the Learn tab underline indicator.</summary>
+    /// <summary>Bottom border thickness for the Background tab underline indicator (legacy property name).</summary>
     [DataMember]
     public string LearnTabUnderline => _isLearnTabSelected ? "0,0,0,2" : "0";
 
@@ -340,7 +342,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     [DataMember]
     public string IssuesTabOpacity => _isIssuesTabSelected ? "1.0" : "0.6";
 
-    /// <summary>Opacity for the Learn tab button.</summary>
+    /// <summary>Opacity for the Background tab button (legacy property name).</summary>
     [DataMember]
     public string LearnTabOpacity => _isLearnTabSelected ? "1.0" : "0.6";
 
@@ -568,7 +570,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     [DataMember]
     public IAsyncCommand SwitchToIssuesTabCommand { get; }
 
-    /// <summary>Command to switch to the Learn tab.</summary>
+    /// <summary>Command to switch to the Background tab (legacy command name).</summary>
     [DataMember]
     public IAsyncCommand SwitchToLearnTabCommand { get; }
 
