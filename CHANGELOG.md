@@ -5,6 +5,27 @@ All notable changes to the Binding Redirect Fixer extension will be documented i
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-18
+
+### Added
+
+- **Guided-removal flow for `ORPHANED .NET Framework` redirects** ([#8](https://github.com/ardimedia-com/visualstudio-binding-redirect-fixer/issues/8)): replaces the one-click `Remove Redirect` button with an inline panel that runs three automated safety checks (solution-wide source-usage grep, GAC folder probe, transitive `bin/` reference scan via `MetadataLoadContext`) plus surfaces the verbatim `<PostBuildEvent>` from the project's `.csproj` for a manual review. The new `Remove Redirect` button is gated on a `CanRemove` computed property — every auto-check must `Pass` AND the user must tick the manual confirmation. If any auto-check fails, the button stays disabled and the failure detail is shown as a tooltip (e.g. *"Cannot remove: `Some.Other.dll` still references `ICSharpCode.SharpZipLib`"*). Closes the classic "click button with warning to verify first" UX trap.
+- **Recursive `bin/` scan**: `BinFolderScanner` now walks `bin/Debug` / `bin/Release` recursively (was top-level-only), so DLLs that ship under `bin/runtimes/<rid>/lib/<tfm>/` are discovered. Fixes the false-orphan reports for `Microsoft.Data.SqlClient.Extensions.*`, `Microsoft.Data.SqlClient.Internal.Logging`, `Microsoft.EntityFramework.SqlServer`, and any other package using the same layout. On duplicate names the shallower (top-level) copy wins so the reported `PhysicalVersion` matches what the CLR actually loads. `bin/runtimes/<rid>/native/` subtrees are explicitly skipped to avoid `BadImageFormatException` noise.
+
+### Changed
+
+- **`OrphanedFramework` `SuggestedAction` is now `VerifyBeforeRemoval`** (was `RemoveRedirect`). The wrapper exposes new bindable properties (`Verification`, `HasVerification`, `CanRemove`, `BlockReason`, `RunButtonVisibility`, `VerificationResultVisibility`, `UserConfirmedPostBuild`, `PostBuildScript`, `VerificationAuto`) to support the new panel.
+- **`Apply All` / bulk-fix no longer auto-removes orphaned .NET Framework redirects**. The allow-list at the bulk-fix path enumerates only the safe single-click actions (`UpdateRedirect` / `AddRedirect` / `RemoveDuplicate` / `RemoveRedirect` / `RemoveAllRedirects`), so `VerifyBeforeRemoval` is naturally excluded from bulk operations. Each row must now be reviewed individually.
+
+### Fixed
+
+- Microsoft.Data.SqlClient.Extensions.\*, Microsoft.Data.SqlClient.Internal.Logging, and Microsoft.EntityFramework.SqlServer no longer appear as `ORPHANED .NET Framework` in the Issues list — they were always present in `bin/runtimes/`, but the previous top-level-only scan missed them. See the recursive scan note under Added.
+
+### Known limitations
+
+- The source-usage check uses the assembly's simple name as a namespace heuristic. Assemblies whose exposed namespaces differ from the assembly name (e.g. `Microsoft.Bcl.AsyncInterfaces` exposes `System.Threading.Tasks`) may report `Pass` even when source code uses the assembly. The transitive `bin/` reference check (3) usually compensates because the consuming DLLs are visible there. A future iteration will harvest exported namespaces from the open `MetadataLoadContext` to close this gap.
+- Post-build scripts with MSBuild property substitutions (e.g. `$(TargetDir)`) are displayed verbatim, not expanded. The user reviews them manually.
+
 ## [0.3.13] - 2026-05-17
 
 ### Added

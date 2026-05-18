@@ -83,7 +83,7 @@ The extension reads assembly versions from multiple sources and compares them:
 | **TOKEN LOST** | DLL exists but is unsigned while config expects a public key token | Preserves token, updates version if needed |
 | **DEPRECATED** | Package is deprecated and should be replaced with a modern equivalent (e.g., `AppAuthentication` -> `Azure.Identity`) | Removes redirect (with warning to check NuGet refs) |
 | **ORPHANED .NET (Core)** | No DLL found in a .NET (Core) project -- redirect is orphaned | Removes the redirect (safe) |
-| **ORPHANED .NET Framework** | No DLL found in a .NET Framework project -- redirect is likely orphaned | Removes the redirect (verify GAC/post-build first) |
+| **ORPHANED .NET Framework** | No DLL found in a .NET Framework project -- redirect is likely orphaned, but GAC / post-build / transitive bin refs could still depend on it | Opens an inline guided-removal panel: runs three automated safety checks (source-usage grep, GAC probe, transitive `bin/` references) and surfaces the `.csproj` post-build script for manual review. `Remove Redirect` is only enabled when every auto check passes AND the manual confirmation is ticked. |
 | **UNUSED IN LIBRARY** | Binding redirect in a class library (DLL) project -- CLR never reads DLL config files | Removes all redirects (section or file deletion) |
 
 ### Package Version vs Assembly Version
