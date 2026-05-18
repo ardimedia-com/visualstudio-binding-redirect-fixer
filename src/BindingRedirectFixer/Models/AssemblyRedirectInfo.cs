@@ -68,7 +68,51 @@ public enum FixAction
     RemoveRedirect,
 
     /// <summary>Remove all binding redirects from the config file (entire assemblyBinding section or file deletion).</summary>
-    RemoveAllRedirects
+    RemoveAllRedirects,
+
+    /// <summary>Open the guided verification flow before allowing removal. Used for OrphanedFramework where naive removal can break GAC / post-build / transitive loads.</summary>
+    VerifyBeforeRemoval
+}
+
+/// <summary>
+/// Outcome of a single orphan-safety check.
+/// </summary>
+public enum SafetyCheckOutcome
+{
+    /// <summary>Check ran and found no evidence the assembly is in use — safe signal.</summary>
+    Pass,
+
+    /// <summary>Check ran and found evidence the assembly IS in use — removing the redirect will likely break something.</summary>
+    Fail,
+
+    /// <summary>Check could not run conclusively (e.g. file lock, IO error). Treat with caution; do not gate removal as Pass.</summary>
+    Inconclusive
+}
+
+/// <summary>
+/// Result of one orphan-safety check (Source-usage / GAC / transitive bin/ refs).
+/// Carries enough context for the UI to show actionable detail when the check fails.
+/// </summary>
+[DataContract]
+public class SafetyCheckResult
+{
+    [DataMember] public string Title { get; set; } = string.Empty;
+    [DataMember] public SafetyCheckOutcome Outcome { get; set; } = SafetyCheckOutcome.Inconclusive;
+    [DataMember] public string Detail { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Per-row state for the OrphanedFramework guided-removal flow:
+/// auto-check results, the post-build script text (verbatim from .csproj), and
+/// the user's manual confirmation that the post-build script does not copy the assembly.
+/// Populated lazily when the user clicks "Verify..." — null until then.
+/// </summary>
+[DataContract]
+public class OrphanVerificationReport
+{
+    [DataMember] public List<SafetyCheckResult> Auto { get; set; } = new();
+    [DataMember] public string PostBuildScript { get; set; } = string.Empty;
+    [DataMember] public bool UserConfirmedPostBuild { get; set; }
 }
 
 /// <summary>
@@ -135,6 +179,55 @@ public class AssemblyRedirectInfo
     public FixAction SuggestedAction { get; set; } = FixAction.None;
 
     /// <summary>
+    /// Orphan verification report — populated lazily when the user opens the guided-removal
+    /// flow for an OrphanedFramework entry. Null until the user clicks "Verify...".
+    /// </summary>
+    [DataMember]
+    public OrphanVerificationReport? Verification { get; set; }
+
+    /// <summary>
+    /// True only when every auto-check in <see cref="Verification"/> has Outcome=Pass AND
+    /// <see cref="OrphanVerificationReport.UserConfirmedPostBuild"/> is true. The Remove
+    /// button is bound to this; if false, removal is blocked.
+    /// </summary>
+    [DataMember]
+    public bool CanRemove => Verification is { } v
+        && v.Auto.Count > 0
+        && v.Auto.TrueForAll(c => c.Outcome == SafetyCheckOutcome.Pass)
+        && v.UserConfirmedPostBuild;
+
+    /// <summary>
+    /// Human-readable explanation when <see cref="CanRemove"/> is false because an auto-check
+    /// failed. Used as the tooltip on the disabled Remove button. Null when no blocker exists
+    /// (e.g. user simply hasn't ticked the manual checkbox yet).
+    /// </summary>
+    [DataMember]
+    public string? BlockReason
+    {
+        get
+        {
+            if (Verification is not { } v)
+            {
+                return null;
+            }
+
+            var firstFail = v.Auto.Find(c => c.Outcome == SafetyCheckOutcome.Fail);
+            if (firstFail is not null)
+            {
+                return $"{firstFail.Title}: {firstFail.Detail}";
+            }
+
+            var firstInconclusive = v.Auto.Find(c => c.Outcome == SafetyCheckOutcome.Inconclusive);
+            if (firstInconclusive is not null)
+            {
+                return $"{firstInconclusive.Title} (inconclusive): {firstInconclusive.Detail}";
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The effective version the binding redirect should target.
     /// Uses the highest of NuGet-resolved and bin/ DLL versions, because the redirect
     /// oldVersion range must cover all referenced versions and newVersion must match
@@ -193,6 +286,7 @@ public class AssemblyRedirectInfo
         FixAction.RemoveDuplicate => "Remove Duplicate",
         FixAction.RemoveRedirect => "Remove Redirect",
         FixAction.RemoveAllRedirects => "Remove All Redirects",
+        FixAction.VerifyBeforeRemoval => "Verify & Remove…",
         _ => ""
     };
 

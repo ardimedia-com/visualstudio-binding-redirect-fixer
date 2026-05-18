@@ -296,19 +296,25 @@ public sealed class BindingRedirectAnalyzer
 
             if (!hasDll)
             {
-                // No DLL found anywhere — redirect is orphaned
+                // No DLL found anywhere — redirect is orphaned.
+                // For .NET Framework: route through the guided VerifyBeforeRemoval flow because
+                // the assembly may still load from the GAC, a post-build copy, or transitively
+                // from another bin/ DLL — naive removal can break a running app.
+                // For modern .NET: removal is always safe (binding redirects have no runtime effect).
                 entry.Status = entry.IsNetFramework
                     ? RedirectStatus.OrphanedFramework
                     : RedirectStatus.Orphaned;
                 entry.DiagnosticMessage = entry.IsNetFramework
                     ? $"No resolved or physical DLL was found for '{entry.Name}'. " +
                       $"The config file has publicKeyToken=\"{entry.ConfigPublicKeyToken}\". " +
-                      "The binding redirect is likely orphaned. Verify the assembly is not loaded from " +
-                      "the GAC, deployed by a post-build step, or required by a signed dependency."
+                      "The binding redirect is likely orphaned. Use Verify & Remove… to run the " +
+                      "safety checks (source usage, GAC, transitive bin/ references) before removal."
                     : $"No resolved or physical DLL was found for '{entry.Name}'. " +
                       $"The config file has publicKeyToken=\"{entry.ConfigPublicKeyToken}\". " +
                       "The binding redirect is orphaned \u2014 .NET (Core) does not use binding redirects.";
-                entry.SuggestedAction = FixAction.RemoveRedirect;
+                entry.SuggestedAction = entry.IsNetFramework
+                    ? FixAction.VerifyBeforeRemoval
+                    : FixAction.RemoveRedirect;
             }
             else
             {

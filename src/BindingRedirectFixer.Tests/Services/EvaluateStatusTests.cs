@@ -148,8 +148,11 @@ public class EvaluateStatusTests
 
     [TestMethod]
     [TestCategory("Unit")]
-    public void OrphanedFw_NoDll_NetFramework_SetsOrphanedFramework()
+    public void OrphanedFw_NoDll_NetFramework_SetsOrphanedFramework_GatedByVerification()
     {
+        // .NET Framework orphan must go through the VerifyBeforeRemoval flow, NOT one-click
+        // RemoveRedirect — GAC / post-build / transitive bin/ references could still depend
+        // on the assembly.
         var entry = CreateEntry(
             resolvedVersion: null,
             physicalVersion: null,
@@ -161,7 +164,92 @@ public class EvaluateStatusTests
         BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
 
         Assert.AreEqual(RedirectStatus.OrphanedFramework, entry.Status);
+        Assert.AreEqual(FixAction.VerifyBeforeRemoval, entry.SuggestedAction);
+        Assert.IsFalse(entry.CanRemove, "CanRemove must be false until verification populates a passing report");
+        Assert.IsNull(entry.Verification, "Verification report is populated lazily at click time, not at scan time");
+        Assert.IsNull(entry.BlockReason, "BlockReason is only meaningful after verification has run");
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void OrphanedCore_NoDll_StillUsesRemoveRedirect_NotGated()
+    {
+        // Modern .NET orphans stay on one-click RemoveRedirect — .NET (Core) does not use
+        // binding redirects at runtime so removal can never break anything.
+        var entry = CreateEntry(
+            resolvedVersion: null,
+            physicalVersion: null,
+            currentRedirectVersion: "9.0.0.0",
+            publicKeyToken: "",
+            configPublicKeyToken: "cc7b13ffcd2ddd51");
+        entry.IsNetFramework = false;
+
+        BindingRedirectAnalyzer.EvaluateStatus(entry, hasVersionConflict: false, hasDuplicateRedirects: false);
+
+        Assert.AreEqual(RedirectStatus.Orphaned, entry.Status);
         Assert.AreEqual(FixAction.RemoveRedirect, entry.SuggestedAction);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CanRemove_TrueWhenAllAutoChecksPassAndUserConfirmed()
+    {
+        var entry = CreateEntry(currentRedirectVersion: "1.0.0.0");
+        entry.IsNetFramework = true;
+        entry.Verification = new OrphanVerificationReport
+        {
+            Auto = new List<SafetyCheckResult>
+            {
+                new() { Title = "Source usage", Outcome = SafetyCheckOutcome.Pass, Detail = "0 matches" },
+                new() { Title = "GAC probe", Outcome = SafetyCheckOutcome.Pass, Detail = "absent" },
+                new() { Title = "Transitive bin/ refs", Outcome = SafetyCheckOutcome.Pass, Detail = "no referrers" },
+            },
+            UserConfirmedPostBuild = true,
+        };
+
+        Assert.IsTrue(entry.CanRemove);
+        Assert.IsNull(entry.BlockReason);
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CanRemove_FalseAndBlockReasonSet_WhenAutoCheckFails()
+    {
+        var entry = CreateEntry(currentRedirectVersion: "1.0.0.0");
+        entry.IsNetFramework = true;
+        entry.Verification = new OrphanVerificationReport
+        {
+            Auto = new List<SafetyCheckResult>
+            {
+                new() { Title = "Source usage", Outcome = SafetyCheckOutcome.Pass, Detail = "0 matches" },
+                new() { Title = "Transitive bin/ refs", Outcome = SafetyCheckOutcome.Fail, Detail = "Some.Other.dll still references it" },
+            },
+            UserConfirmedPostBuild = true,
+        };
+
+        Assert.IsFalse(entry.CanRemove);
+        Assert.IsNotNull(entry.BlockReason);
+        Assert.IsTrue(entry.BlockReason!.Contains("Transitive bin/ refs"));
+        Assert.IsTrue(entry.BlockReason.Contains("Some.Other.dll"));
+    }
+
+    [TestMethod]
+    [TestCategory("Unit")]
+    public void CanRemove_FalseWhenUserHasNotConfirmedPostBuild_NoBlockReason()
+    {
+        var entry = CreateEntry(currentRedirectVersion: "1.0.0.0");
+        entry.IsNetFramework = true;
+        entry.Verification = new OrphanVerificationReport
+        {
+            Auto = new List<SafetyCheckResult>
+            {
+                new() { Title = "Source usage", Outcome = SafetyCheckOutcome.Pass, Detail = "0 matches" },
+            },
+            UserConfirmedPostBuild = false,
+        };
+
+        Assert.IsFalse(entry.CanRemove);
+        Assert.IsNull(entry.BlockReason, "BlockReason is for auto-check failures; a missing manual tick is a different UI signal");
     }
 
     [TestMethod]
