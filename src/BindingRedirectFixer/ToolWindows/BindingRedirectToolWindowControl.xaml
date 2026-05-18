@@ -780,7 +780,31 @@
 
                 <!-- Section 3: Common Scenarios -->
                 <TextBlock Text="Common Scenarios"
-                           FontSize="18" FontWeight="Bold" Margin="0,0,0,12" />
+                           FontSize="18" FontWeight="Bold" Margin="0,0,0,8" />
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,4" Opacity="0.85"
+                           Text="The cards below are grouped by severity, indicated by the left-edge colour:" />
+                <StackPanel Margin="6,0,0,12">
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Border Width="10" Height="10" Background="#E05050" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock FontSize="11.5" Opacity="0.85"
+                                   Text="Red &#x2014; runtime failure or guaranteed misconfiguration. Fix before deploy." />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Border Width="10" Height="10" Background="#D4A030" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock FontSize="11.5" Opacity="0.85"
+                                   Text="Amber &#x2014; very likely a problem, but the tool wants you to verify before acting." />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Border Width="10" Height="10" Background="#4CAF50" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock FontSize="11.5" Opacity="0.85"
+                                   Text="Green &#x2014; safe to apply the suggested fix in one click." />
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                        <Border Width="10" Height="10" Background="#5090E0" Margin="0,0,8,0" VerticalAlignment="Center" />
+                        <TextBlock FontSize="11.5" Opacity="0.85"
+                                   Text="Blue &#x2014; informational only, no action required." />
+                    </StackPanel>
+                </StackPanel>
 
                 <!-- ── Red (error / action required) ── -->
 
@@ -855,10 +879,12 @@
                 <!-- ORPHANED .NET Framework Card -->
                 <Border BorderBrush="#D4A030" BorderThickness="0,0,0,3" CornerRadius="4" Margin="0,0,0,12" Padding="14,10" Background="Transparent">
                     <StackPanel>
-                        <TextBlock Text="ORPHANED .NET Framework  &#x2014;  No DLL Found" FontSize="13" FontWeight="Bold" Foreground="#D4A030" Margin="0,0,0,6" />
+                        <TextBlock Text="ORPHANED .NET Framework  &#x2014;  No DLL Found, Verify Before Removal" FontSize="13" FontWeight="Bold" Foreground="#D4A030" Margin="0,0,0,6" />
                         <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" Opacity="0.85"
-                                   Text="No resolved or physical DLL was found for this assembly in a .NET Framework project. The binding redirect is likely orphaned, but in .NET Framework the assembly could be loaded from the GAC, deployed by a post-build step, or required by a signed dependency." />
-                        <TextBlock FontSize="11" Opacity="0.55" FontStyle="Italic" Text="Likely safe to remove, but verify first. The tool offers [Remove Redirect]" />
+                                   Text="No resolved or physical DLL was found for this assembly in a .NET Framework project. Even with nothing in bin/, the assembly can still load from the GAC, be copied by a post-build step, or be pulled in transitively by another bin/ DLL &#x2014; so removal needs verification." />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,6" Opacity="0.85"
+                                   Text="The tool offers a guided Verify &amp; Remove&#x2026; flow: it runs three automated safety checks (solution-wide source-usage grep, GAC folder probe, transitive bin/ reference scan) and surfaces the project's PostBuildEvent for manual review. Remove Redirect only enables when every auto check Passes AND the post-build confirmation is ticked. If any check Fails or is Inconclusive, the panel shows a block hint and an Open Config File for Manual Editing button instead &#x2014; you can still remove the redirect by hand." />
+                        <TextBlock FontSize="11" Opacity="0.55" FontStyle="Italic" Text="The tool offers [Verify &amp; Remove&#x2026;] with three auto-checks + manual confirmation" />
                     </StackPanel>
                 </Border>
 
@@ -934,6 +960,67 @@
 
                 <TextBlock TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,24" Opacity="0.85"
                            Text="The redirect newVersion must match the DLL the runtime will actually load. If bin/ has a higher version than NuGet resolved, the redirect targets the bin/ version. After a clean rebuild, both should align." />
+
+                <!-- Separator -->
+                <Border Height="1" Opacity="0.15" Margin="0,0,0,24" Background="Gray" />
+
+                <!-- Section 5: How the Orphan-Safety Checks Work -->
+                <TextBlock Text="How the Orphan-Safety Checks Work"
+                           FontSize="18" FontWeight="Bold" Margin="0,0,0,10" />
+                <TextBlock TextWrapping="Wrap" FontSize="12.5" Margin="0,0,0,10" Opacity="0.85"
+                           Text="ORPHANED .NET Framework rows look like they could be auto-removed, but in .NET Framework an assembly can still load from places the project file does not mention. To prevent breaking a running app, removal is gated by three automated checks plus one manual review." />
+
+                <!-- Check 1 -->
+                <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10" Opacity="0.85" Background="Transparent">
+                    <StackPanel>
+                        <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"
+                                   Text="1. Source code references" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,0" Opacity="0.85"
+                                   Text="Grep across every .cs and .vb file in the solution for the assembly's name as a using directive or a qualified type reference. Folders bin/, obj/, node_modules/, .git/, .vs/, and packages/ are skipped. A match means at least one file still depends on the assembly &#x2014; Fail." />
+                    </StackPanel>
+                </Border>
+
+                <!-- Check 2 -->
+                <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10" Opacity="0.85" Background="Transparent">
+                    <StackPanel>
+                        <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"
+                                   Text="2. Global Assembly Cache" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,0" Opacity="0.85"
+                                   Text="Probe %WINDIR%\Microsoft.NET\assembly\GAC_MSIL\&lt;name&gt;, GAC_32\&lt;name&gt;, GAC_64\&lt;name&gt;, and the legacy %WINDIR%\assembly\GAC_MSIL\&lt;name&gt;. If a folder exists, the CLR can satisfy the redirect from the GAC even with nothing in bin/ &#x2014; Fail." />
+                    </StackPanel>
+                </Border>
+
+                <!-- Check 3 -->
+                <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10" Opacity="0.85" Background="Transparent">
+                    <StackPanel>
+                        <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"
+                                   Text="3. Transitive bin/ references" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,0" Opacity="0.85"
+                                   Text="Open every DLL under bin/ (including bin/runtimes/&lt;rid&gt;/lib/&lt;tfm&gt;/) with MetadataLoadContext and inspect its AssemblyRef table. If any DLL still references the target, removing the redirect would break that DLL at runtime &#x2014; Fail. Native runtimes subfolders are skipped." />
+                    </StackPanel>
+                </Border>
+
+                <!-- Check 4 (manual) -->
+                <Border BorderBrush="Gray" BorderThickness="0,0,0,1" Padding="0,0,0,10" Margin="0,0,0,10" Opacity="0.85" Background="Transparent">
+                    <StackPanel>
+                        <TextBlock FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"
+                                   Text="4. Post-build script (manual)" />
+                        <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,0" Opacity="0.85"
+                                   Text="Post-build scripts are arbitrary shell and can copy DLLs from anywhere &#x2014; the tool cannot reason about them. The verbatim PostBuildEvent text is shown in an expander so you can review and confirm no step copies the assembly. The checkbox is the final gate before Remove enables." />
+                    </StackPanel>
+                </Border>
+
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,8" Opacity="0.85"
+                           Text="Outcome combination:" />
+                <StackPanel Margin="6,0,0,10">
+                    <TextBlock FontSize="11.5" Margin="0,2,0,0" Opacity="0.85"
+                               Text="&#x2022; All three auto checks Pass + checkbox ticked  &#x2192;  Remove Redirect enabled." />
+                    <TextBlock FontSize="11.5" Margin="0,2,0,0" Opacity="0.85"
+                               Text="&#x2022; Any auto check Fails or is Inconclusive  &#x2192;  Remove hidden; Open Config File for Manual Editing offered." />
+                </StackPanel>
+
+                <TextBlock TextWrapping="Wrap" FontSize="12" Margin="0,0,0,24" Opacity="0.85"
+                           Text="Known limitation: the source-usage check uses the assembly name as a namespace heuristic. Assemblies whose namespace differs from their assembly name (e.g. Microsoft.Bcl.AsyncInterfaces exposes System.Threading.Tasks) may slip past check 1 &#x2014; checks 2 and 3 normally compensate. A future iteration will harvest the exported namespaces directly from MetadataLoadContext." />
 
             </StackPanel>
         </ScrollViewer>

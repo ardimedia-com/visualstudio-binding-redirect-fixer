@@ -18,22 +18,24 @@ Tracking down which redirects are wrong and what versions they should point to i
 
 ## Features
 
-- **Automatic Detection** -- scans all projects in your solution for stale, missing, or conflicting binding redirects
+- **Automatic Detection** -- scans all projects in your solution for stale, missing, orphaned, conflicting, or critically mismatched binding redirects
 - **Multi-Source Version Resolution** -- cross-references four independent sources to pinpoint exactly where versions diverge:
   1. NuGet resolved DLL (authoritative)
   2. Package reference version (cross-check)
-  3. Physical DLL in `bin/` (what is deployed)
+  3. Physical DLL in `bin/` -- walks `bin/runtimes/<rid>/lib/<tfm>/` too, top-level DLL wins on duplicate names
   4. Config redirect (what the runtime uses)
-- **One-Click Fix** -- update stale redirects, add missing ones, or rebuild projects with conflicting bin/ output
-- **Fix All** -- batch-fix all detected issues in a single click
+- **Smart Fix Actions** -- updates stale redirects, adds missing ones, removes duplicates, or rebuilds projects with conflicting bin/ output. High-risk removals (orphaned .NET Framework) route through a guided flow with safety checks instead of a single click.
+- **Fix Shown Items / Fix All** -- batch-fix the currently visible issues. The guided orphan-.NET-Framework flow is excluded from bulk operations -- each must be reviewed individually.
+- **Critical Mismatch Detection** -- flags redirects pointing forward to a version that exists nowhere on disk; runtime `FileLoadException` at startup is guaranteed. Auto-updates to the highest version available on disk.
+- **Guided Orphan Removal (.NET Framework)** -- runs three automated safety checks (solution-wide source-usage grep, GAC folder probe, transitive `bin/` reference scan via `MetadataLoadContext`) plus surfaces the project's `<PostBuildEvent>` for manual review. `Remove Redirect` only enables when every auto check passes AND the manual confirmation is ticked. If a check fails, the panel routes you to `Open Config File for Manual Editing` instead.
+- **Build-Required Banner** -- when the scan finds no on-disk DLLs for any redirect (project not built, NuGet not restored), a banner explains that detection is degraded and prompts to build + restore first.
 - **Deprecated Package Detection** -- flags packages like `Microsoft.Azure.Services.AppAuthentication` with migration guidance and offers removal with a warning
-- **Orphaned Redirect Detection** -- detects binding redirects with no DLL on disk, distinguishes .NET (Core) (safe to remove) from .NET Framework (verify GAC first)
 - **DLL Project Redirect Cleanup** -- detects class library projects where binding redirects have no effect (CLR only reads host app config) and offers bulk removal of the entire section or file
-- **Framework Detection** -- reads target framework from `.csproj` to provide framework-specific guidance
+- **Framework Detection** -- reads target framework from `.csproj` to provide framework-specific guidance, including detection of legacy ASP.NET Web Application Projects (WAPs)
 - **Supports Both Project Types** -- works with PackageReference and `packages.config` projects
 - **Parallel Scanning** -- analyses up to 5 projects concurrently with real-time progress ("Analysing 3 of 12: ProjectName...")
 - **Resizable & Sortable Columns** -- drag column borders to resize, click headers to sort ascending/descending
-- **Educational UI** -- a built-in Learn tab explains what binding redirects are, why they break, and how this tool resolves them
+- **Educational UI** -- a built-in Background tab explains what binding redirects are, why they break, how this tool resolves them, and how the orphan-safety checks work
 - **Theme-Aware** -- fully adapts to Light, Dark, Blue, and High Contrast themes
 - **Non-Destructive** -- creates timestamped backups before modifying any config file
 
