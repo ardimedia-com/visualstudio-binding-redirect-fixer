@@ -621,12 +621,75 @@
                                        Text="This is a .NET (Core) project. No resolved or physical DLL was found for this assembly. The binding redirect is orphaned &#x2014; .NET (Core) does not use binding redirects. Safe to remove." />
                         </Border>
 
-                        <!-- Orphaned FW warning — .NET Framework: verify before removing -->
-                        <Border Visibility="{Binding OrphanedFrameworkWarningVisibility}"
+                        <!-- ORPHANED .NET Framework Guided-Removal Panel -->
+                        <Border Visibility="{Binding GuidedVerificationVisibility}"
                                 Background="#3CFFC107" BorderBrush="#FFC107" BorderThickness="1"
-                                CornerRadius="3" Padding="10,8" Margin="0,0,0,8">
-                            <TextBlock TextWrapping="Wrap" FontSize="11.5" Opacity="0.9"
-                                       Text="This is a .NET Framework project. No resolved or physical DLL was found for this assembly. The binding redirect is likely orphaned, but verify the assembly is not loaded from the GAC, deployed by a post-build step, or required by a signed dependency &#x2014; removing the redirect in those cases can cause runtime binding failures." />
+                                CornerRadius="3" Padding="12,10" Margin="0,0,0,8">
+                            <StackPanel>
+                                <TextBlock TextWrapping="Wrap" FontSize="11.5" Opacity="0.9" Margin="0,0,0,8"
+                                           Text="This binding redirect appears orphaned, but in .NET Framework an assembly can still load from the GAC, a post-build copy, or transitively from another bin/ DLL. Run the safety checks first." />
+
+                                <!-- Step 1: Run checks -->
+                                <Button Content="Run safety checks"
+                                        Command="{Binding RunOrphanVerificationCommand}"
+                                        Padding="14,4" Margin="0,0,0,8"
+                                        HorizontalAlignment="Left"
+                                        Visibility="{Binding SelectedIssue.RunButtonVisibility}" />
+
+                                <!-- Step 2: Result checklist -->
+                                <StackPanel Visibility="{Binding SelectedIssue.VerificationResultVisibility}">
+                                    <TextBlock Text="Auto checks:" FontWeight="SemiBold" FontSize="11" Margin="0,0,0,4" />
+                                    <ItemsControl ItemsSource="{Binding SelectedIssue.VerificationAuto}" Margin="0,0,0,8">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,2,0,2">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="18" />
+                                                        <ColumnDefinition Width="180" />
+                                                        <ColumnDefinition Width="*" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <TextBlock Grid.Column="0" Text="{Binding OutcomeIcon}" FontSize="12" />
+                                                    <TextBlock Grid.Column="1" Text="{Binding Title}" FontSize="11" FontWeight="SemiBold" />
+                                                    <TextBlock Grid.Column="2" Text="{Binding Detail}" FontSize="11" Opacity="0.85" TextWrapping="Wrap" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+
+                                    <!-- Re-run button -->
+                                    <Button Content="Re-run checks"
+                                            Command="{Binding RunOrphanVerificationCommand}"
+                                            Padding="10,2" Margin="0,0,0,8" FontSize="10"
+                                            HorizontalAlignment="Left" />
+
+                                    <!-- Post-build script viewer (Expander) -->
+                                    <Expander Header="Post-build script (review manually)" FontSize="11" Margin="0,0,0,6"
+                                              IsExpanded="False">
+                                        <TextBox Text="{Binding SelectedIssue.PostBuildScript, Mode=OneWay}"
+                                                 IsReadOnly="True"
+                                                 FontFamily="Consolas" FontSize="10.5"
+                                                 MaxHeight="160"
+                                                 VerticalScrollBarVisibility="Auto"
+                                                 HorizontalScrollBarVisibility="Auto"
+                                                 TextWrapping="NoWrap" AcceptsReturn="True"
+                                                 Background="Transparent"
+                                                 Margin="0,4,0,0" />
+                                    </Expander>
+
+                                    <!-- Manual confirmation checkbox -->
+                                    <CheckBox Content="I have reviewed the post-build script and confirmed no step copies this assembly."
+                                              IsChecked="{Binding SelectedIssue.UserConfirmedPostBuild, Mode=TwoWay}"
+                                              FontSize="11" Margin="0,4,0,8" />
+
+                                    <!-- Remove button (gated on CanRemove) + block-reason tooltip -->
+                                    <Button Content="Remove Redirect"
+                                            Command="{Binding FixSelectedCommand}"
+                                            IsEnabled="{Binding SelectedIssue.CanRemove}"
+                                            ToolTip="{Binding SelectedIssue.BlockReason}"
+                                            ToolTipService.ShowOnDisabled="True"
+                                            Padding="18,5" HorizontalAlignment="Left" />
+                                </StackPanel>
+                            </StackPanel>
                         </Border>
 
                         <!-- Unused in Library warning — DLL projects never use binding redirects -->

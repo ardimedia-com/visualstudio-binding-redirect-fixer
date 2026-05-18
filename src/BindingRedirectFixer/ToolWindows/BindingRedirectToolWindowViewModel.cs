@@ -21,6 +21,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
 {
     private readonly BindingRedirectAnalyzer _analyzer = new();
     private readonly ConfigPatcher _configPatcher = new();
+    private readonly OrphanSafetyVerifier _orphanVerifier = OrphanSafetyVerifier.CreateDefault();
 
     private List<AssemblyRedirectInfo> _allResults = [];
     private readonly Dictionary<string, string> _projectDirectories = new(StringComparer.OrdinalIgnoreCase);
@@ -81,6 +82,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
         OpenGitHubIssuesCommand = new AsyncCommand(ExecuteOpenGitHubIssuesAsync);
         SubmitFeedbackCommand = new AsyncCommand(ExecuteSubmitFeedbackAsync);
         FixSelectedCommand = new AsyncCommand(ExecuteFixSelectedAsync);
+        RunOrphanVerificationCommand = new AsyncCommand(ExecuteRunOrphanVerificationAsync);
         FilterByProjectCommand = new AsyncCommand(ExecuteFilterByProjectAsync);
         FilterByStatusCommand = new AsyncCommand(ExecuteFilterByStatusAsync);
         ApplyAssemblyFilterCommand = new AsyncCommand(ExecuteApplyAssemblyFilterAsync);
@@ -185,6 +187,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
                 LoadConfigSnippet();
                 RaiseNotifyPropertyChangedEvent(nameof(DetailPanelVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(ActionButtonVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(GuidedVerificationVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(DeprecatedWarningVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(OrphanedWarningVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(OrphanedFrameworkWarningVisibility));
@@ -443,10 +446,25 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     public string DetailPanelVisibility =>
         _selectedIssue is not null ? "Visible" : "Collapsed";
 
-    /// <summary>WPF Visibility for the action button in the detail panel.</summary>
+    /// <summary>
+    /// WPF Visibility for the legacy single-click action button in the detail panel.
+    /// OrphanedFramework rows are handled by the inline guided-verification panel instead,
+    /// so we explicitly hide the legacy button for them to avoid showing two action buttons.
+    /// </summary>
     [DataMember]
     public string ActionButtonVisibility =>
-        _selectedIssue is not null && _selectedIssue.HasAction ? "Visible" : "Collapsed";
+        _selectedIssue is not null
+        && _selectedIssue.HasAction
+        && _selectedIssue.SuggestedAction != FixAction.VerifyBeforeRemoval
+            ? "Visible" : "Collapsed";
+
+    /// <summary>WPF Visibility for the inline guided-verification panel (OrphanedFramework only).</summary>
+    [DataMember]
+    public string GuidedVerificationVisibility =>
+        _selectedIssue is not null
+        && _selectedIssue.Status == RedirectStatus.OrphanedFramework
+        && _selectedIssue.SuggestedAction == FixAction.VerifyBeforeRemoval
+            ? "Visible" : "Collapsed";
 
     /// <summary>WPF Visibility for the deprecated removal warning in the detail panel.</summary>
     [DataMember]
@@ -568,6 +586,14 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
     /// <summary>Command to fix the currently selected issue only.</summary>
     [DataMember]
     public IAsyncCommand FixSelectedCommand { get; }
+
+    /// <summary>
+    /// Command to run the three orphan safety checks (source usage, GAC, transitive bin/
+    /// refs) plus extract the post-build script for the currently selected OrphanedFramework
+    /// row. Populates <see cref="AssemblyRedirectInfoViewModel.Verification"/> on completion.
+    /// </summary>
+    [DataMember]
+    public IAsyncCommand RunOrphanVerificationCommand { get; }
 
     /// <summary>Command to apply the project filter from the dropdown.</summary>
     [DataMember]
@@ -1264,11 +1290,24 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
                 return Task.CompletedTask;
             }
 
+            // VerifyBeforeRemoval is the guided-removal action for OrphanedFramework. The Remove
+            // button in the inline panel is bound to CanRemove (which already requires all auto
+            // checks Pass + manual confirmation), so reaching this branch with CanRemove=true
+            // means the user has cleared every gate — fall through to the RemoveRedirect path.
+            if (model.SuggestedAction == FixAction.VerifyBeforeRemoval && !SelectedIssue.CanRemove)
+            {
+                StatusText = SelectedIssue.BlockReason is { } reason
+                    ? $"Cannot remove {SelectedIssue.Name}: {reason}"
+                    : $"Cannot remove {SelectedIssue.Name}: complete the safety checks first.";
+                return Task.CompletedTask;
+            }
+
             string targetVersion = model.EffectiveTargetVersion ?? string.Empty;
             bool isDeprecatedRemoval = model.Status == RedirectStatus.Deprecated
                 && model.SuggestedAction == FixAction.RemoveRedirect;
             bool isOrphanedRemoval = model.Status is RedirectStatus.Orphaned or RedirectStatus.OrphanedFramework
-                && model.SuggestedAction == FixAction.RemoveRedirect;
+                && (model.SuggestedAction == FixAction.RemoveRedirect
+                    || model.SuggestedAction == FixAction.VerifyBeforeRemoval);
 
             bool success = model.SuggestedAction switch
             {
@@ -1282,12 +1321,15 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
                     configPath, model.Name, targetVersion),
                 FixAction.RemoveRedirect => _configPatcher.RemoveRedirect(
                     configPath, model.Name),
+                FixAction.VerifyBeforeRemoval => _configPatcher.RemoveRedirect(
+                    configPath, model.Name),
                 _ => false
             };
 
             if (success)
             {
-                bool isRemoval = model.SuggestedAction == FixAction.RemoveRedirect;
+                bool isRemoval = model.SuggestedAction == FixAction.RemoveRedirect
+                    || model.SuggestedAction == FixAction.VerifyBeforeRemoval;
                 string fixedVersion = isRemoval ? "\u2014" : targetVersion;
                 string oldVersion = SelectedIssue.CurrentRedirectVersion;
                 string actionVerb = model.SuggestedAction switch
@@ -1295,6 +1337,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
                     FixAction.AddRedirect => "Added",
                     FixAction.RemoveDuplicate => "Deduplicated",
                     FixAction.RemoveRedirect => "Removed",
+                    FixAction.VerifyBeforeRemoval => "Removed",
                     _ => "Updated"
                 };
 
@@ -1345,6 +1388,7 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
                 // Refresh detail panel visibility (action button should hide)
                 RaiseNotifyPropertyChangedEvent(nameof(DetailPanelVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(ActionButtonVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(GuidedVerificationVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(DeprecatedWarningVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(OrphanedWarningVisibility));
                 RaiseNotifyPropertyChangedEvent(nameof(OrphanedFrameworkWarningVisibility));
@@ -1365,6 +1409,97 @@ public class BindingRedirectToolWindowViewModel : ToolWindowViewModelBase
         }
 
         return Task.CompletedTask;
+    }
+
+    private async Task ExecuteRunOrphanVerificationAsync(object? parameter, CancellationToken cancellationToken)
+    {
+        if (SelectedIssue is null
+            || SelectedIssue.Status != RedirectStatus.OrphanedFramework
+            || SelectedIssue.SuggestedAction != FixAction.VerifyBeforeRemoval)
+        {
+            return;
+        }
+
+        var captured = SelectedIssue;
+        if (!_projectDirectories.TryGetValue(captured.ProjectName, out string? projectDir))
+        {
+            StatusText = $"Could not find project directory for {captured.Name}.";
+            return;
+        }
+
+        // SolutionDirectory: use the common ancestor of all known project directories so the
+        // source-usage check scans every C# file in the solution, not just the owning project.
+        string? solutionDirectory = ComputeSolutionDirectory();
+
+        StatusText = $"Running safety checks for {captured.Name}…";
+
+        try
+        {
+            var ctx = new OrphanCheckContext(
+                AssemblyName: captured.Name,
+                ProjectDirectory: projectDir,
+                SolutionDirectory: solutionDirectory);
+
+            OrphanVerificationReport report = await _orphanVerifier
+                .VerifyAsync(ctx, cancellationToken)
+                .ConfigureAwait(true);
+
+            captured.Verification = report;
+            int fails = report.Auto.Count(c => c.Outcome == SafetyCheckOutcome.Fail);
+            int inconclusive = report.Auto.Count(c => c.Outcome == SafetyCheckOutcome.Inconclusive);
+            StatusText = fails > 0
+                ? $"Safety checks done for {captured.Name}: {fails} check(s) blocked removal."
+                : inconclusive > 0
+                    ? $"Safety checks done for {captured.Name}: {inconclusive} inconclusive — review before removing."
+                    : $"Safety checks done for {captured.Name}: all auto checks passed. Confirm post-build, then Remove.";
+        }
+        catch (OperationCanceledException)
+        {
+            StatusText = $"Safety checks cancelled for {captured.Name}.";
+        }
+        catch (Exception ex)
+        {
+            StatusText = $"Safety checks failed for {captured.Name}: {ex.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Best-effort solution-root inference: returns the common ancestor directory of every
+    /// known project directory. Used by the source-usage check to scope its grep to the
+    /// solution (not just the owning project) so usages in sibling projects are caught.
+    /// </summary>
+    private string? ComputeSolutionDirectory()
+    {
+        var dirs = _projectDirectories.Values.ToList();
+        if (dirs.Count == 0)
+        {
+            return null;
+        }
+        if (dirs.Count == 1)
+        {
+            return dirs[0];
+        }
+
+        string[] parts = dirs[0].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        int common = parts.Length;
+
+        for (int i = 1; i < dirs.Count; i++)
+        {
+            string[] other = dirs[i].Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            int max = Math.Min(common, other.Length);
+            int j = 0;
+            while (j < max && string.Equals(parts[j], other[j], StringComparison.OrdinalIgnoreCase))
+            {
+                j++;
+            }
+            common = j;
+            if (common == 0)
+            {
+                return null;
+            }
+        }
+
+        return string.Join(Path.DirectorySeparatorChar, parts.Take(common));
     }
 
     private Task ExecuteFilterByProjectAsync(object? parameter, CancellationToken cancellationToken)
@@ -1656,6 +1791,138 @@ public class AssemblyRedirectInfoViewModel : NotifyPropertyChangedObject
     /// <summary>Whether the action button should be visible.</summary>
     [DataMember]
     public bool HasAction => SuggestedAction != FixAction.None;
+
+    private OrphanVerificationReport? _verification;
+
+    /// <summary>
+    /// Lazy-populated by the parent ViewModel after the user clicks "Run safety checks".
+    /// Null until then; once set, <see cref="HasVerification"/> flips to true and the
+    /// inline checklist becomes visible.
+    /// </summary>
+    [DataMember]
+    public OrphanVerificationReport? Verification
+    {
+        get => _verification;
+        set
+        {
+            if (!ReferenceEquals(_verification, value))
+            {
+                _verification = value;
+                // Reset the user's manual confirmation whenever a fresh verification is set
+                // so a re-run doesn't carry stale consent forward.
+                _userConfirmedPostBuild = false;
+                RaiseNotifyPropertyChangedEvent(nameof(Verification));
+                RaiseNotifyPropertyChangedEvent(nameof(HasVerification));
+                RaiseNotifyPropertyChangedEvent(nameof(RunButtonVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(VerificationResultVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(VerificationVisibility));
+                RaiseNotifyPropertyChangedEvent(nameof(VerificationAuto));
+                RaiseNotifyPropertyChangedEvent(nameof(PostBuildScript));
+                RaiseNotifyPropertyChangedEvent(nameof(HasPostBuildScript));
+                RaiseNotifyPropertyChangedEvent(nameof(UserConfirmedPostBuild));
+                RaiseNotifyPropertyChangedEvent(nameof(CanRemove));
+                RaiseNotifyPropertyChangedEvent(nameof(BlockReason));
+                RaiseNotifyPropertyChangedEvent(nameof(HasBlockReason));
+            }
+        }
+    }
+
+    /// <summary>True once the verification has been run at least once.</summary>
+    [DataMember]
+    public bool HasVerification => _verification is not null;
+
+    /// <summary>"Run safety checks" button is visible only before the first run.</summary>
+    [DataMember]
+    public string RunButtonVisibility => HasVerification ? "Collapsed" : "Visible";
+
+    /// <summary>Result checklist + Remove button are visible only after the first run.</summary>
+    [DataMember]
+    public string VerificationResultVisibility => HasVerification ? "Visible" : "Collapsed";
+
+    /// <summary>
+    /// WPF visibility for the guided-verification panel — only shown for OrphanedFramework
+    /// rows that are awaiting verification or have run it.
+    /// </summary>
+    [DataMember]
+    public string VerificationVisibility =>
+        Status == RedirectStatus.OrphanedFramework && SuggestedAction == FixAction.VerifyBeforeRemoval
+            ? "Visible" : "Collapsed";
+
+    /// <summary>Convenience binding target for the checklist ItemsControl.</summary>
+    [DataMember]
+    public IReadOnlyList<SafetyCheckResult> VerificationAuto =>
+        _verification?.Auto ?? [];
+
+    /// <summary>Verbatim post-build script text extracted from the project's .csproj.</summary>
+    [DataMember]
+    public string PostBuildScript => _verification?.PostBuildScript ?? string.Empty;
+
+    /// <summary>True when the project has any post-build steps worth reviewing.</summary>
+    [DataMember]
+    public bool HasPostBuildScript => !string.IsNullOrWhiteSpace(_verification?.PostBuildScript);
+
+    private bool _userConfirmedPostBuild;
+
+    /// <summary>
+    /// Two-way bound to the manual confirmation checkbox in the guided panel. Mirrored
+    /// to the underlying report so external readers see a consistent state.
+    /// </summary>
+    [DataMember]
+    public bool UserConfirmedPostBuild
+    {
+        get => _userConfirmedPostBuild;
+        set
+        {
+            if (_userConfirmedPostBuild != value)
+            {
+                _userConfirmedPostBuild = value;
+                if (_verification is not null)
+                {
+                    _verification.UserConfirmedPostBuild = value;
+                }
+                RaiseNotifyPropertyChangedEvent(nameof(UserConfirmedPostBuild));
+                RaiseNotifyPropertyChangedEvent(nameof(CanRemove));
+            }
+        }
+    }
+
+    /// <summary>
+    /// True only when every auto-check has Outcome=Pass AND the user has confirmed they
+    /// reviewed the post-build script. The Remove Redirect button is gated on this.
+    /// </summary>
+    [DataMember]
+    public bool CanRemove => _verification is { } v
+        && v.Auto.Count > 0
+        && v.Auto.TrueForAll(c => c.Outcome == SafetyCheckOutcome.Pass)
+        && _userConfirmedPostBuild;
+
+    /// <summary>Human-readable reason the Remove button is disabled when an auto-check failed.</summary>
+    [DataMember]
+    public string? BlockReason
+    {
+        get
+        {
+            if (_verification is not { } v)
+            {
+                return null;
+            }
+            var firstFail = v.Auto.Find(c => c.Outcome == SafetyCheckOutcome.Fail);
+            if (firstFail is not null)
+            {
+                return $"{firstFail.Title}: {firstFail.Detail}";
+            }
+            var firstInconclusive = v.Auto.Find(c => c.Outcome == SafetyCheckOutcome.Inconclusive);
+            if (firstInconclusive is not null)
+            {
+                return $"{firstInconclusive.Title} (inconclusive): {firstInconclusive.Detail}";
+            }
+            return null;
+        }
+    }
+
+    /// <summary>True when <see cref="BlockReason"/> would yield a non-empty string.</summary>
+    [DataMember]
+    public bool HasBlockReason => !string.IsNullOrEmpty(BlockReason);
 
     /// <summary>
     /// Marks this row as fixed in-place: updates the config version, status, and diagnostics

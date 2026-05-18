@@ -99,6 +99,19 @@ public class SafetyCheckResult
     [DataMember] public string Title { get; set; } = string.Empty;
     [DataMember] public SafetyCheckOutcome Outcome { get; set; } = SafetyCheckOutcome.Inconclusive;
     [DataMember] public string Detail { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Unicode glyph for the per-result row in the guided-removal panel.
+    /// Pass = check, Fail = cross, Inconclusive = question mark.
+    /// </summary>
+    [DataMember]
+    public string OutcomeIcon => Outcome switch
+    {
+        SafetyCheckOutcome.Pass => "✓",
+        SafetyCheckOutcome.Fail => "✗",
+        SafetyCheckOutcome.Inconclusive => "?",
+        _ => string.Empty,
+    };
 }
 
 /// <summary>
